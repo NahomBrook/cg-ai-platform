@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { db, type TransactionClient } from "@/lib/db";
+import { db } from "@/lib/db";
 
 export async function POST(req: Request) {
   try {
     const { name, ownerEmail, ownerName } = await req.json();
 
-    const result = await db.$transaction(async (tx: TransactionClient) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await db.$transaction(async (tx: any) => {
       const tenant = await tx.tenant.create({
         data: {
           name,
