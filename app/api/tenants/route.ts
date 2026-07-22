@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, type TransactionClient } from "@/lib/db";
 
 export async function POST(req: Request) {
   try {
     const { name, ownerEmail, ownerName } = await req.json();
 
-    // TypeScript automatically infers 'tx' as the TransactionClient type here
-    const result = await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx: TransactionClient) => {
       const tenant = await tx.tenant.create({
         data: {
           name,
