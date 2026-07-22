@@ -1,0 +1,200 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [pgvector(map: "vector")]
+}
+
+// --- ENUMS ---
+
+enum UserRole {
+  SUPER_ADMIN @map("super_admin")
+  TENANT_OWNER @map("tenant_owner")
+  STAFF        @map("staff")
+
+  @@map("user_role")
+}
+
+enum PlatformType {
+  TIKTOK         @map("tiktok")
+  META_INSTAGRAM @map("meta_instagram")
+  META_FACEBOOK  @map("meta_facebook")
+  X              @map("x")
+  LINKEDIN       @map("linkedin")
+  YOUTUBE        @map("youtube")
+
+  @@map("platform_type")
+}
+
+enum ContentState {
+  DRAFT              @map("draft")
+  PENDING_REVIEW     @map("pending_review")
+  APPROVED_SCHEDULED @map("approved_scheduled")
+  PUBLISHED          @map("published")
+  REJECTED           @map("rejected")
+
+  @@map("content_state")
+}
+
+enum ApprovalAction {
+  APPROVED @map("approved")
+  REJECTED @map("rejected")
+
+  @@map("approval_action")
+}
+
+enum BillingStatus {
+  ACTIVE   @map("active")
+  PAST_DUE @map("past_due")
+  CANCELED @map("canceled")
+  TRIALING @map("trialing")
+
+  @@map("billing_status")
+}
+
+enum BrandVoiceSource {
+  HISTORICAL @map("historical")
+  GUIDELINE  @map("guideline")
+  MANUAL     @map("manual")
+
+  @@map("brand_voice_source")
+}
+
+// --- MODELS ---
+
+model Tenant {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name               String               @db.VarChar
+  pricingTier        String               @default("standard") @map("pricing_tier") @db.VarChar
+  discountFlag       Boolean              @default(false) @map("discount_flag")
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  users              AppUser[]
+  socialAccounts     SocialAccount[]
+  brandVoiceProfiles BrandVoiceProfile[]
+  contentItems       ContentItem[]
+  recommendations    Recommendation[]
+  billingSubscription BillingSubscription?
+
+  @@map("tenant")
+}
+
+model AppUser {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String?       @map("tenant_id") @db.Uuid
+  role         UserRole
+  email        String        @unique @db.VarChar
+  authProvider String        @map("auth_provider") @db.VarChar
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  tenant       Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentItems ContentItem[]
+  approvalLogs ApprovalLog[]
+
+  @@map("app_user")
+}
+
+model SocialAccount {
+  id                   String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId             String       @map("tenant_id") @db.Uuid
+  platform             PlatformType
+  encryptedAccessToken String       @map("encrypted_access_token") @db.Text
+  encryptedRefreshToken String?     @map("encrypted_refresh_token") @db.Text
+  tokenExpiresAt       DateTime?    @map("token_expires_at") @db.Timestamptz
+  connectedAt          DateTime     @default(now()) @map("connected_at") @db.Timestamptz
+  tenant               Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentItems         ContentItem[]
+
+  @@unique([tenantId, platform])
+  @@index([tenantId], map: "idx_social_account_tenant")
+  @@map("social_account")
+}
+
+model BrandVoiceProfile {
+  id             String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String                          @map("tenant_id") @db.Uuid
+  sourceType     BrandVoiceSource                @map("source_type")
+  contentSummary String?                         @map("content_summary") @db.Text
+  embedding      Unsupported("vector(768)")?     // Gemini Embedding dimension
+  createdAt      DateTime                        @default(now()) @map("created_at") @db.Timestamptz
+  tenant         Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("brand_voice_profile")
+}
+
+model ContentItem {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String              @map("tenant_id") @db.Uuid
+  socialAccountId   String              @map("social_account_id") @db.Uuid
+  platform          PlatformType
+  state             ContentState        @default(DRAFT)
+  bodyText          String?             @map("body_text") @db.Text
+  hashtags          String?             @db.Text
+  scriptText        String?             @map("script_text") @db.Text
+  createdByUserId   String?             @map("created_by_user_id") @db.Uuid
+  scheduledAt       DateTime?           @map("scheduled_at") @db.Timestamptz
+  publishedAt       DateTime?           @map("published_at") @db.Timestamptz
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  socialAccount     SocialAccount       @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  createdByUser     AppUser?            @relation(fields: [createdByUserId], references: [id])
+  approvalLogs      ApprovalLog[]
+  analyticsSnapshots AnalyticsSnapshot[]
+
+  @@index([tenantId, state], map: "idx_content_item_tenant_state")
+  @@map("content_item")
+}
+
+model ApprovalLog {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contentItemId String         @map("content_item_id") @db.Uuid
+  actorUserId   String         @map("actor_user_id") @db.Uuid
+  action        ApprovalAction
+  notes         String?        @db.Text
+  timestamp     DateTime       @default(now()) @db.Timestamptz
+  contentItem   ContentItem    @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  actorUser     AppUser        @relation(fields: [actorUserId], references: [id])
+
+  @@map("approval_log")
+}
+
+model AnalyticsSnapshot {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contentItemId String       @map("content_item_id") @db.Uuid
+  platform      PlatformType
+  views         Int?         @default(0)
+  likes         Int?         @default(0)
+  comments      Int?         @default(0)
+  shares        Int?         @default(0)
+  fetchedAt     DateTime     @default(now()) @map("fetched_at") @db.Timestamptz
+  contentItem   ContentItem  @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+
+  @@index([contentItemId], map: "idx_analytics_content_item")
+  @@map("analytics_snapshot")
+}
+
+model Recommendation {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  summaryText        String    @map("summary_text") @db.Text
+  basedOnPeriodStart DateTime? @map("based_on_period_start") @db.Timestamptz
+  basedOnPeriodEnd   DateTime? @map("based_on_period_end") @db.Timestamptz
+  generatedAt        DateTime  @default(now()) @map("generated_at") @db.Timestamptz
+  tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("recommendation")
+}
+
+model BillingSubscription {
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String        @unique @map("tenant_id") @db.Uuid
+  plan                String        @db.VarChar
+  status              BillingStatus
+  externalProviderRef String?       @map("external_provider_ref") @db.VarChar
+  createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  tenant              Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("billing_subscription")
+}
