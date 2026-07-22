@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { Prisma } from "@prisma/client"; // 1. Import Prisma namespace
 
 export async function POST(req: Request) {
   try {
     const { name, ownerEmail, ownerName } = await req.json();
 
-    // Execute atomic creation of Tenant and Initial Owner User
-    // 2. Type 'tx' explicitly as Prisma.TransactionClient
-    const result = await db.$transaction(async (tx: Prisma.TransactionClient) => {
+    // TypeScript automatically infers 'tx' as the TransactionClient type here
+    const result = await db.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({
         data: {
           name,
